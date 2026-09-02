@@ -1,0 +1,3 @@
+export function json(data:unknown,status=200,headers:HeadersInit={}){return Response.json(data,{status,headers:{'Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'",...headers}})}
+export function assertSameOrigin(request:Request){const origin=request.headers.get('origin');if(origin&&new URL(origin).origin!==new URL(request.url).origin)throw new Error('INVALID_ORIGIN')}
+export function readCookie(request:Request,name:string){for(const part of (request.headers.get('cookie')||'').split(';')){const [key,...value]=part.trim().split('=');if(key===name)return decodeURIComponent(value.join('='))}return null}

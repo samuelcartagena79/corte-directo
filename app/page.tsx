@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Check, ChevronRight, MapPin, ShieldCheck, Truck } from 'lucide-react';
 
 const cities = ['Tallahassee', 'Monticello', 'Live Oak', 'Lake City', 'Perry', 'Madison'];
@@ -29,13 +29,12 @@ const cuts = [
   { name: 'Chicharrón', image: null },
   { name: 'Manteca de Cerdo', image: null },
 ];
-type Preorder = { id:string; createdAt:string; name:string; phone:string; city:string; zip:string; quantity:number; combo:string; chorizo:string; gift:string };
-
 export default function Home() {
-  const [saved, setSaved] = useState<Preorder[]>([]);
   const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [orderNumber, setOrderNumber] = useState('');
   const [selectedCombo, setSelectedCombo] = useState('CD-PARRILLERO');
-  useEffect(() => { const data = window.localStorage.getItem('corte-directo-preorders'); if (data) setSaved(JSON.parse(data)); }, []);
 
   function scrollToSection(id: 'combos' | 'cortes' | 'preorden') {
     const section = document.getElementById(id);
@@ -44,17 +43,10 @@ export default function Home() {
     window.history.replaceState(null, '', `#${id}`);
   }
 
-  function submitPreorder(event: FormEvent<HTMLFormElement>) {
+  async function submitPreorder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const preorder: Preorder = {
-      id:`PRE-${Date.now()}`, createdAt:new Date().toISOString(), name:String(form.get('name')), phone:String(form.get('phone')),
-      city:String(form.get('city')), zip:String(form.get('zip')), quantity:Number(form.get('quantity')), combo:String(form.get('combo')),
-      chorizo:String(form.get('chorizo') ?? ''), gift:String(form.get('gift') ?? ''),
-    };
-    const next = [...saved, preorder];
-    window.localStorage.setItem('corte-directo-preorders', JSON.stringify(next));
-    setSaved(next); setSuccess(true); event.currentTarget.reset();
+    const formElement=event.currentTarget;const form=new FormData(formElement);setSubmitting(true);setSuccess(false);setError('');
+    try{const response=await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idempotencyKey:crypto.randomUUID(),name:form.get('name'),phone:form.get('phone'),city:form.get('city'),zip:form.get('zip'),address:form.get('address'),quantity:form.get('quantity'),combo:form.get('combo'),chorizo:form.get('chorizo')||undefined,gift:form.get('gift')||undefined,paymentMethod:form.get('paymentMethod')})});const result=await response.json() as {error?:string;order?:{order_number:string}};if(!response.ok||!result.order)throw new Error(result.error||'No pudimos guardar la orden.');setOrderNumber(result.order.order_number);setSuccess(true);formElement.reset();setSelectedCombo('CD-PARRILLERO')}catch(submissionError){setError(submissionError instanceof Error?submissionError.message:'No pudimos guardar la orden.')}finally{setSubmitting(false)}
   }
 
   return <main>
@@ -118,22 +110,25 @@ export default function Home() {
         <p>Te contactaremos para confirmar disponibilidad y coordinar la entrega. Registrar tu interés no genera un cobro ni confirma inventario.</p>
         <div className="selected-card"><span>Combo seleccionado</span><strong>{combos.find(combo => combo.code === selectedCombo)?.name}</strong></div>
         <div className="city-list"><MapPin size={19} /> {cities.join(' · ')}</div>
-        <div className="status-note"><Check size={18} /> {saved.length} preorden{saved.length === 1 ? '' : 'es'} guardada{saved.length === 1 ? '' : 's'} localmente</div>
+        <div className="status-note"><Check size={18} /> Tu orden se guardará de forma segura para que podamos darle seguimiento.</div>
       </div>
       <form className="preorder-form" onSubmit={submitPreorder}><div className="field-grid">
         <label>Nombre completo<input name="name" autoComplete="name" required placeholder="Tu nombre" /></label>
         <label>Teléfono<input name="phone" type="tel" autoComplete="tel" required placeholder="(850) 000-0000" /></label>
         <label>Ciudad<select name="city" required defaultValue=""><option value="" disabled>Selecciona tu ciudad</option>{cities.map(city => <option key={city}>{city}</option>)}</select></label>
         <label>ZIP<input name="zip" inputMode="numeric" autoComplete="postal-code" required pattern="[0-9]{5}" maxLength={5} placeholder="32301" /></label>
+        <label className="wide-field">Dirección de entrega<input name="address" autoComplete="street-address" required minLength={5} maxLength={180} placeholder="Calle, número y apartamento" /></label>
         <label>Combo<select name="combo" required value={selectedCombo} onChange={event => setSelectedCombo(event.target.value)}>{combos.map(combo => <option key={combo.code} value={combo.code}>{combo.name} · {combo.weight}</option>)}</select></label>
         <label>Cantidad<input name="quantity" type="number" min="1" max="20" defaultValue="1" required /></label>
+        <label className="wide-field">Método de pago<select name="paymentMethod" defaultValue="cash_on_delivery" required><option value="cash_on_delivery">Cash on Delivery</option><option value="card_stripe" disabled>Card / Stripe — próximamente</option></select></label>
         {selectedCombo === 'CD-PARRILLERO' && <><label>Chorizo<select name="chorizo" required defaultValue=""><option value="" disabled>Escoge una opción</option><option>Chorizo Argentino</option><option>Salchicha Parrillera</option></select></label>
         <label className="wide-field">Regalo<select name="gift" required defaultValue=""><option value="" disabled>Escoge tu regalo</option><option>Chicharrón</option><option>Manteca de Cerdo</option></select></label></>}
       </div>
         <label className="consent"><input type="checkbox" required /> Autorizo a Corte Directo by Mi Casita a usar estos datos para contactarme sobre esta preorden.</label>
-        <button className="submit-button" type="submit">Reservar mi combo <ChevronRight size={18} /></button>
-        <p className="form-disclaimer"><ShieldCheck size={14}/> Prototipo local · No procesa pagos · No confirma inventario</p>
-        {success && <output className="success" aria-live="polite"><Check size={18} /> Interés registrado en este dispositivo. La preorden sigue pendiente de confirmación.</output>}
+        <button className="submit-button" type="submit" disabled={submitting}>{submitting?'Guardando orden…':'Reservar mi combo'} <ChevronRight size={18} /></button>
+        <p className="form-disclaimer"><ShieldCheck size={14}/> Cash on Delivery · No se realizará ningún cobro en línea</p>
+        {error && <output className="form-error" aria-live="polite">{error}</output>}
+        {success && <output className="success" aria-live="polite"><Check size={18} /> Orden {orderNumber} registrada. Te contactaremos para confirmar disponibilidad y entrega.</output>}
       </form>
     </div></section>
   </main>;
